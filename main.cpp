@@ -1,21 +1,26 @@
 #include "mbed.h"
 #define INTERVAL 50
-#define CHKINTERVAL 150
+#define DSTINTERVAL 150
+#define IRINTERVAL 80
 #define PULSE 10
 #define HIGH 1
 #define STOP 0
 #define PULSEMIN 500
-#define PULSEMAX 2300 
+#define PULSEMAX 2350 
 #define FOWARD 1
 #define BACKWARD 2
-#define MOTORPULSE 5
+#define MOTORPULSE 430
 #define DISTANCIA 348 //6cm
+#define DISTANCIARANGO 290//5cm
 #define DISTANCIAMAX 1800//20cm aprox
+#define ANGULOMAX 90
+#define ANGULOMIN -90
+
 typedef union{
+            unsigned char modeOn: 1;
             unsigned char servoMoved: 1;
-            unsigned char b1: 1;
-            unsigned char b2: 1;
-            unsigned char b3: 1;
+            unsigned char idleFlag: 1;
+            unsigned char GetLine: 1;
             unsigned char b4: 1;
             unsigned char b5: 1;
             unsigned char b6: 1;
@@ -30,6 +35,14 @@ typedef union {
 }_udat;
 
 _udat myWord;
+typedef union {
+    int32_t i32;
+    int16_t i16[2];
+    int8_t i8[4];
+}_udatint;
+
+_udatint myNewWord;
+
 typedef enum{
     IDLE,
     FOLLOW,
@@ -92,14 +105,20 @@ _sTeclas ourButton;
 void miTrigger(); 
 void StartEcho();
 void EndEcho();
-void servoMove();
+void servoMove(int8_t angulo);
 void actuallizaMef();
 void startMef();
-void myMotors(uint8_t right,uint8_t left);
+void heartBeatTask();
+void myMotor1(uint8_t direction);
+void myMotor2(uint8_t direction); 
 void onDataRx();
 void decodeProtocol();
 void decodeData();
 void sendData();
+void readSpeedHl();
+void readSpeedHr();
+void readSensors();
+void readIr();
 
 DigitalOut LED(PC_13);
 DigitalOut LEDAUX(PB_9);
@@ -121,75 +140,183 @@ DigitalOut TRIGGER(PB_13);
 
 DigitalIn BUTTON(PB_4);
 
+AnalogIn IR0(PA_0);
+AnalogIn IR1(PA_1);
+
+InterruptIn HL(PB_9);
+InterruptIn HR(PB_8);//horquillas
+
 Timer miTimer; 
 Timer miTimer1;
+Ticker readSensor;
 Timeout timeout;
-uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0;
-uint32_t ANCHO=1000;
-uint8_t myFlag=0;
-
+uint8_t factor,counterM1,counterM2;
+uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,speedM1=0,speedM2=0,counterRight=0,counterLeft=0;
+uint16_t ANCHO=1000,valueIr0,valueIr1;
+int32_t testM1,testM2;
+int16_t difValue;
+int8_t angulo=0;
+ 
 int main(){
     
-    ENA.pulsewidth_ms(MOTORPULSE);
-    ENB.pulsewidth_ms(MOTORPULSE);
-    myMotors(FOWARD,FOWARD);
-    
+    ENA.period_us(1000);
+    ENB.period_us(1000);
+    ENA.pulsewidth_us(MOTORPULSE);
+    ENB.pulsewidth_us(MOTORPULSE);
+    factor=(PULSEMAX-PULSEMIN)/180;
+    myMotor1(FOWARD);
+    myMotor2(FOWARD);
     wait_ms(500);
     
-    myMotors(BACKWARD,BACKWARD);
-    
+    myMotor1(BACKWARD);
+    myMotor2(BACKWARD);
     wait_ms(500);
-   
-    myMotors(STOP,STOP);    
-    SERVO.pulsewidth_us(PULSEMIN);
+    servoMove(ANGULOMAX);
+    myMotor1(STOP);    
+    myMotor2(STOP);
+
+    //SERVO.pulsewidth_us(PULSEMIN);
+    
     wait_ms(400);
-    SERVO.pulsewidth_us(PULSEMAX);
+    servoMove(ANGULOMIN);
     wait_ms(400);
-    SERVO.pulsewidth_us((PULSEMIN+PULSEMAX)/2);
-    ANCHO=(PULSEMIN+PULSEMAX)/2;
+    servoMove(STOP);
+    //SERVO.pulsewidth_us((PULSEMIN+PULSEMAX)/2);
+    
     startMef();
     miTimer.start();
     miTimer1.start();
     pcCom.attach(&onDataRx,Serial::RxIrq);//
+    
+    HL.rise(&readSpeedHl);
+    HR.rise(&readSpeedHr);
+    readSensor.attach_us(&readSensors,PULSEMIN*1000);
+
     ECHO.rise(&StartEcho);
     ECHO.fall(&EndEcho);
+    myFlags.modeOn=STOP;
+    myFlags.GetLine=STOP; 
+
     mode=IDLE;
     while(1){
-        if(miTimer.read_ms()-timeToChk > CHKINTERVAL){
+        if(miTimer.read_ms()-timeToChk > DSTINTERVAL){
                 TRIGGER.write(HIGH);
                 timeout.attach_us(&miTrigger,PULSE);
-                LED=!LED;
                 timeToChk=miTimer.read_ms();
+                LED=!LED;
             }
         if(miTimer.read_ms()-timeHb > INTERVAL){
             actuallizaMef();
             timeHb=miTimer.read_ms();
         }
+        if(miTimer.read_ms()-timeIr > IRINTERVAL){
+            readIr();
+            timeIr=miTimer.read_ms();
+        }
+        
         switch (mode)
         {
         case IDLE:
-            
+                if(myFlags.idleFlag==STOP){
+                    myMotor1(STOP);
+                    myMotor2(STOP);
+                    servoMove(STOP);
+                    myFlags.idleFlag=HIGH;
+                }
             break;
         case FOLLOW:
-            if(timeSaved > DISTANCIAMAX){
-                if(miTimer.read_ms()-timeServo > INTERVAL){
-                    servoMove();
-                    timeServo=miTimer.read_ms();
-                } 
-                myMotors(STOP,STOP);
-            }else{ //si la distancia esta dentro de la maxima 
-                if(timeSaved < DISTANCIA){
-                        myMotors(BACKWARD,BACKWARD);
-                }else{         
-                        myMotors(FOWARD,FOWARD);  
-                }                    
-            }
+            //if(myFlags.modeOn==HIGH){
+                ENA.pulsewidth_us(MOTORPULSE);
+                ENB.pulsewidth_us(MOTORPULSE);
+                if(timeSaved > DISTANCIAMAX){ //si la distancia es menor a 20cm aprox
+                    if(miTimer.read_ms()-timeServo > INTERVAL){ //se mueve el servo
+                        if(myFlags.servoMoved==HIGH){   //Si es la parte positiva
+                            angulo+=3;    
+                            if(angulo>=ANGULOMAX)
+                                myFlags.servoMoved=STOP;
+                                //cambio el valor de la flag    
+                            
+                        }else{ //si ya llego a 90º cambio el valor de la flag 
+                                angulo-=3;    
+                            if(angulo<=ANGULOMIN)
+                                myFlags.servoMoved=HIGH;
+                                //cambio el valor de la flag           
+                        }     
+                        servoMove(angulo); 
+                        timeServo=miTimer.read_ms();
+                    } 
+                    myMotor1(STOP);    
+                    myMotor2(STOP);
+                }else{ //si la distancia esta dentro de la maxima 
+                    if(timeSaved<=DISTANCIA+20 && timeSaved >=DISTANCIARANGO){
+                        myMotor1(STOP);
+                        myMotor2(STOP);
+                    }else{
+                    
+                        if(timeSaved < DISTANCIA){
+                                myMotor1(BACKWARD);
+                                myMotor2(BACKWARD);
+                        }else{         
+                                myMotor1(FOWARD);
+                                myMotor2(FOWARD);
+                        }                    
+                    }
+                }
+            // }else{ //si el modo esta inactivo
+            //     myMotor1(STOP);  
+            //     myMotor2(STOP);
+            //     //servoMove(STOP);
+            // }
             break;
-        case LINE:
-                 myMotors(STOP,STOP); 
+        case LINE:                    
+           // if(myFlags.modeOn==HIGH){
+                if(valueIr1>valueIr0){           
+                    ENA.pulsewidth_us(MOTORPULSE-100);
+                    ENB.pulsewidth_us(MOTORPULSE);
+                    myMotor1(FOWARD);
+                    myMotor2(FOWARD);
+                    myFlags.GetLine=STOP;
+                }    
+                if(valueIr0 > valueIr1){       
+                    ENB.pulsewidth_us(MOTORPULSE-100);
+                    ENA.pulsewidth_us(MOTORPULSE);
+                    myMotor1(STOP);
+                    myMotor2(FOWARD);
+                    myFlags.GetLine=HIGH;
+                }
+                if(valueIr1 > 20000 && valueIr0 > 20000 ){
+                    myMotor1(FOWARD);
+                    myMotor2(FOWARD);
+                }
+                // if(valueIr1 <1000 && valueIr0 < 1000){ //si se perdio la linea 
+                //     if(myFlags.GetLine==HIGH){ //si hizo motor 1 STP y motor 2 FWD por ultimo 
+                //         myMotor1(FOWARD);
+                //         myMotor2(STOP);
+                //     }else{ //si por utimo hizo motor2STP y motor 1 FWD
+                //         myMotor1(STOP);
+                //         myMotor2(FOWARD);
+                //     }
+                // }
+                if(timeSaved < DISTANCIARANGO){ //frena si detecta obstaculo
+                    myMotor1(STOP);    
+                    myMotor2(STOP);
+                }
+            // }else{
+            //     myMotor1(STOP);  
+            //     myMotor2(STOP); 
+            //     //servoMove(STOP);
+            // }
             break;
         case ESCAPE:
-                myMotors(STOP,STOP); 
+                ENA.pulsewidth_us(MOTORPULSE+70);
+                ENB.pulsewidth_us(MOTORPULSE+70);
+            if(counterM2 <= 30 && counterM1 <= 30){
+                myMotor1(FOWARD);
+                myMotor2(BACKWARD);    
+            }else{
+                myMotor1(STOP);    
+                myMotor2(STOP);   
+            }
             break;
         default:
             mode=IDLE;
@@ -238,19 +365,37 @@ void actuallizaMef(){
             ourButton.estado=BUTTON_UP;
             //Flanco de Subida
             ourButton.timeDiff=miTimer.read_ms()-ourButton.timeDown;
-            if(mode == IDLE){
-                mode=FOLLOW;  
-            }else{
-                if(mode==FOLLOW){
-                    mode=LINE;
+            if(ourButton.timeDiff > 100 && ourButton.timeDiff < 1000){
+                if(mode == IDLE){
+                    myFlags.modeOn=STOP;//apaga la flag del inicio del modo 
+                    mode=FOLLOW;  
                 }else{
-                    if(mode==LINE){
-                        mode=ESCAPE;
+                    if(mode==FOLLOW){
+                        myFlags.modeOn=STOP;
+                        mode=LINE;
                     }else{
-                        mode=IDLE;
+                        if(mode==LINE){
+                            myFlags.modeOn=STOP;
+                            counterM2=0;
+                            counterM1=0;
+                            mode=ESCAPE;
+                        }else{
+                            myFlags.idleFlag=STOP;
+                            mode=IDLE;
+                        }
                     }
-                }
-            }            
+                }            
+            }
+            if(ourButton.timeDiff>=1000 && ourButton.timeDiff<=2000){
+                if(myFlags.modeOn==STOP)//si el modo esta off
+                    myFlags.modeOn=HIGH;//lo inicio 
+            }
+            if(ourButton.timeDiff >=3000 && mode!=IDLE){
+                myFlags.modeOn=STOP;
+                myFlags.idleFlag=STOP;
+                mode=IDLE;
+            }
+
         }   
         else
             ourButton.estado=BUTTON_DOWN;
@@ -262,7 +407,40 @@ void actuallizaMef(){
         break;
     
     }
-}    
+}  
+void heartBeatTask(){
+    // if(mode==IDLE){
+    //     if(miTimer.read_ms()-timeHb > DSTINTERVAL){
+    //         LED!=LED;
+    //         timeHb=miTimer.read_ms();
+    //     }
+    // }
+    // if(mode==FOLLOW){
+    //         if(myFlags.modeOn==STOP){
+    //             if(miTimer.read_ms()-timeHb > IRINTERVAL){
+    //                 LED!=LED;
+    //                 timeHb=miTimer.read_ms();
+    //             }else{
+    //                 LED=STOP;
+    //             }        
+    //         }
+    //}
+    // if(mode==LINE){
+    //         if(myFlags.modeOn=STOP){
+                   
+    //         }else{
+                
+    //         }
+    // }
+    // if(mode==ESCAPE){
+    //         if(myFlags.modeOn=STOP){
+
+    //         }else{
+                
+    //         }
+    
+    // }
+}  
 void miTrigger(){
     TRIGGER.write(0);
 }
@@ -271,46 +449,62 @@ void StartEcho(){ //si se termino de mandar el trigger, el ECHO se pone en 1 (ar
 }
 void EndEcho(){ //si el ECHO se puso en 0 (paro el timer)
     timeSaved = miTimer1.read_us();
+    datosComProtocol.payload[1]=GET_DISTANCE;
+    decodeData();
 } 
-void servoMove(){
-     if(myFlags.servoMoved){   
-        ANCHO+=45;    
-         if(ANCHO>=PULSEMAX)
-             myFlags.servoMoved=STOP;
-             //cambio el valor de la flag    
+void servoMove(int8_t angulo){
+    if(angulo ==ANGULOMIN)
+        ANCHO=PULSEMIN;
+    if(angulo > ANGULOMIN && angulo < STOP){//si el angulo es positivo
+        ANCHO= PULSEMIN +(factor*(angulo+90));
+    }
+    if(angulo==STOP)
+        ANCHO=(PULSEMAX+PULSEMIN)/2;
+    if(angulo > STOP && angulo < ANGULOMAX){
+        ANCHO=(angulo * factor) + ((PULSEMAX+PULSEMIN)/2);
+    }
+    if(angulo==ANGULOMAX)
+        ANCHO=PULSEMAX;
+    //  if(myFlags.servoMoved){   
+    //     ANCHO+=45;    
+    //      if(ANCHO>=PULSEMAX)
+    //          myFlags.servoMoved=STOP;
+    //          //cambio el valor de la flag    
          
-     }else{
-            ANCHO-=45;    
-         if(ANCHO<=PULSEMIN)
-             myFlags.servoMoved=HIGH;
-             //cambio el valor de la flag           
-     }    
-    SERVO.pulsewidth_us(ANCHO);
+    //  }else{
+    //         ANCHO-=45;    
+    //      if(ANCHO<=PULSEMIN)
+    //          myFlags.servoMoved=HIGH;
+    //          //cambio el valor de la flag           
+    //  }    
+     SERVO.pulsewidth_us(ANCHO);
        
 } 
-void myMotors(uint8_t right,uint8_t left){
-    if(right==FOWARD){
+void myMotor1(uint8_t direction){
+    if(direction==FOWARD){
         IN3=HIGH;
         IN4=STOP;
     }
-    if(right==STOP){
+    if(direction==STOP){
         IN3=STOP;
         IN4=STOP;
     }
-    if(right==BACKWARD){
+    if(direction==BACKWARD){
         IN3=STOP;
         IN4=HIGH; 
 
     }
-    if(left==FOWARD){
+}
+void myMotor2(uint8_t direction){
+    if(direction==FOWARD){
         IN1=HIGH;
         IN2=STOP;
     }
-    if(left==STOP){
+    if(direction==STOP){
         IN1=STOP;
         IN2=STOP;
     }
-    if(left==BACKWARD){
+    if(direction==BACKWARD){
         IN1=STOP;
         IN2=HIGH;
     }
@@ -401,8 +595,12 @@ void decodeProtocol(void)
     
 
 }
-
-
+void readIr(){
+    valueIr0=IR0.read_u16();    
+    valueIr1=IR1.read_u16();
+    datosComProtocol.payload[1]=GET_IR;
+    decodeData();
+}
 /*****************************************************************************************************/
 /************  Función para procesar el comando recibido ***********************/
 void decodeData(void)
@@ -421,6 +619,18 @@ void decodeData(void)
             auxBuffTx[indiceAux++]=ACK;
             auxBuffTx[NBYTES]=0x03;
             break;
+        case GET_IR:
+            auxBuffTx[indiceAux++]=GET_IR;
+            
+            myWord.ui16[0]=IR0.read_u16();//lecturaSensorIRLeft
+            myWord.ui16[1]=IR1.read_u16();//lecturaSensorIRright
+            
+            auxBuffTx[indiceAux++]=myWord.ui8[0];
+            auxBuffTx[indiceAux++]=myWord.ui8[1];
+            auxBuffTx[indiceAux++]=myWord.ui8[2];
+            auxBuffTx[indiceAux++]=myWord.ui8[3];
+            auxBuffTx[NBYTES]=0x06;
+        break;
         case GET_DISTANCE:
             auxBuffTx[indiceAux++]=GET_DISTANCE;
             myWord.ui32=timeSaved;
@@ -429,6 +639,66 @@ void decodeData(void)
             auxBuffTx[indiceAux++]=myWord.ui8[2];
             auxBuffTx[indiceAux++]=myWord.ui8[3];
             auxBuffTx[NBYTES]=0x06;
+        break;
+        case GET_SPEED:
+            auxBuffTx[indiceAux++]=GET_SPEED;
+            myWord.ui32=speedM1; //Horquilla L 
+            auxBuffTx[indiceAux++]=myWord.ui8[0];
+            auxBuffTx[indiceAux++]=myWord.ui8[1];
+            auxBuffTx[indiceAux++]=myWord.ui8[2];
+            auxBuffTx[indiceAux++]=myWord.ui8[3];
+            
+            myWord.ui32=speedM2; //horquilla R
+            auxBuffTx[indiceAux++]=myWord.ui8[0];
+            auxBuffTx[indiceAux++]=myWord.ui8[1];
+            auxBuffTx[indiceAux++]=myWord.ui8[2];
+            auxBuffTx[indiceAux++]=myWord.ui8[3];
+            auxBuffTx[NBYTES]=0x0A;
+        break;
+        case MOTOR_T:
+                myNewWord.i8[0]=datosComProtocol.payload[2];
+                myNewWord.i8[1]=datosComProtocol.payload[3];
+                myNewWord.i8[2]=datosComProtocol.payload[4];
+                myNewWord.i8[3]=datosComProtocol.payload[5];
+                testM1=myNewWord.i32;
+
+                myNewWord.i8[0]=datosComProtocol.payload[6];
+                myNewWord.i8[1]=datosComProtocol.payload[7];
+                myNewWord.i8[2]=datosComProtocol.payload[8];
+                myNewWord.i8[3]=datosComProtocol.payload[9];
+                testM2=myNewWord.i32;
+                if(mode==IDLE){    
+                    if(testM1 <= 0){
+                        myMotor1(BACKWARD);
+                        testM1=testM1*-1;
+                        ENA.pulsewidth_us(testM1);
+                    }else{
+                        ENA.pulsewidth_us(testM1); 
+                        myMotor1(FOWARD); 
+                    }    
+                    
+                    if(testM2<=0){
+                        myMotor2(BACKWARD);
+                        testM2=testM2*-1;
+                        ENB.pulsewidth_us(testM2);
+                    }else{
+                        ENB.pulsewidth_us(testM2); 
+                        myMotor2(FOWARD); 
+                    }        
+                }
+                auxBuffTx[indiceAux++]=MOTOR_T;
+                auxBuffTx[indiceAux++]=0x0D;//manda ack de motor
+                auxBuffTx[NBYTES]=0x03;
+        break;
+        case SERVO_T:
+            
+            if(mode==IDLE){
+                angulo=datosComProtocol.payload[2];  
+                servoMove(angulo);
+            }
+            auxBuffTx[indiceAux++]=SERVO_T;       
+            auxBuffTx[indiceAux++]=0x0D;              
+            auxBuffTx[NBYTES]=0x03;
         break;
         default:
             auxBuffTx[indiceAux++]=0xDD;
@@ -444,4 +714,19 @@ void decodeData(void)
     datosComProtocol.bufferTx[datosComProtocol.indexWriteTx++]=cheksum;
 
 }
-
+void readSpeedHl(){
+    counterLeft++;
+    counterM2++;
+}
+void readSpeedHr(){
+    counterRight++;
+    counterM1++;
+}
+void readSensors(){
+    speedM1=counterRight;
+    speedM2=counterLeft;
+    datosComProtocol.payload[1]=GET_SPEED;
+    decodeData();
+    counterRight=0;
+    counterLeft=0;
+}
