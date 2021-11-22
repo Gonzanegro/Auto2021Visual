@@ -11,17 +11,18 @@
 #define BACKWARD 2
 #define MOTORPULSE 430
 #define DISTANCIA 348 //6cm
-#define DISTANCIARANGO 290//5cm
+#define DISTANCIARANGO 250//4.3
 #define DISTANCIAMAX 1800//20cm aprox
 #define ANGULOMAX 90
 #define ANGULOMIN -90
-
+#define TURNLEFT 45//pulsos de horuqilla para -90
+#define TURNRIGHT 45 //pulsos de horquilla para 90
 typedef union{
             unsigned char modeOn: 1;
             unsigned char servoMoved: 1;
             unsigned char idleFlag: 1;
             unsigned char GetLine: 1;
-            unsigned char b4: 1;
+            unsigned char readyPosition: 1;
             unsigned char b5: 1;
             unsigned char b6: 1;
             unsigned char b7: 1;
@@ -150,8 +151,8 @@ Timer miTimer;
 Timer miTimer1;
 Ticker readSensor;
 Timeout timeout;
-uint8_t factor,counterM1,counterM2;
-uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,speedM1=0,speedM2=0,counterRight=0,counterLeft=0;
+uint8_t factor,counterM1=0,counterM2=0,counterRight=0,counterLeft=0,rotationLeft=0,rotationRight=0;
+uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,timePos=0,speedM1=0,speedM2=0;
 uint16_t ANCHO=1000,valueIr0,valueIr1;
 int32_t testM1,testM2;
 int16_t difValue;
@@ -196,7 +197,7 @@ int main(){
     ECHO.fall(&EndEcho);
     myFlags.modeOn=STOP;
     myFlags.GetLine=STOP; 
-
+    myFlags.readyPosition=STOP;
     mode=IDLE;
     while(1){
         if(miTimer.read_ms()-timeToChk > DSTINTERVAL){
@@ -226,8 +227,8 @@ int main(){
             break;
         case FOLLOW:
             //if(myFlags.modeOn==HIGH){
-                ENA.pulsewidth_us(MOTORPULSE);
-                ENB.pulsewidth_us(MOTORPULSE);
+                ENA.pulsewidth_us(MOTORPULSE+70);
+                ENB.pulsewidth_us(MOTORPULSE+70);
                 if(timeSaved > DISTANCIAMAX){ //si la distancia es menor a 20cm aprox
                     if(miTimer.read_ms()-timeServo > INTERVAL){ //se mueve el servo
                         if(myFlags.servoMoved==HIGH){   //Si es la parte positiva
@@ -243,23 +244,61 @@ int main(){
                                 //cambio el valor de la flag           
                         }     
                         servoMove(angulo); 
+                        if(angulo > STOP)
+                            rotationRight=(angulo*TURNRIGHT) /90;
+                        if(angulo < STOP)
+                            rotationLeft=(angulo*TURNLEFT) /-90;
                         timeServo=miTimer.read_ms();
                     } 
+                    counterM1=0;
+                    counterM2=0;
                     myMotor1(STOP);    
                     myMotor2(STOP);
                 }else{ //si la distancia esta dentro de la maxima 
-                    if(timeSaved<=DISTANCIA+20 && timeSaved >=DISTANCIARANGO){
-                        myMotor1(STOP);
-                        myMotor2(STOP);
+                    if(angulo==STOP){    
+                        counterM2=0;
+                        counterM1=0;
+                        if(timeSaved<=DISTANCIA+20 && timeSaved >=DISTANCIARANGO){
+                            myMotor1(STOP);
+                            myMotor2(STOP);
+                        }else{
+                        
+                            if(timeSaved < DISTANCIA){
+                                    myMotor1(BACKWARD);
+                                    myMotor2(BACKWARD);
+                            }else{         
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD);
+                            }                    
+                        }
                     }else{
-                    
-                        if(timeSaved < DISTANCIA){
+                        if(angulo < STOP){
+                            if(counterM2 <= rotationLeft && counterM1 <= rotationLeft){
                                 myMotor1(BACKWARD);
+                                myMotor2(FOWARD);    
+                            }else{
+                                counterM1=0;
+                                counterM2=0;
+                                myMotor1(STOP);
+                                myMotor2(STOP);
+                                angulo=STOP;
+                                servoMove(angulo);
+                            }
+                        }
+                        if(angulo > STOP){
+                            if(counterM2 <= rotationRight && counterM1 <= rotationRight){
                                 myMotor2(BACKWARD);
-                        }else{         
                                 myMotor1(FOWARD);
-                                myMotor2(FOWARD);
-                        }                    
+                            }else{
+                                counterM1=0;
+                                counterM2=0;
+                                myMotor1(STOP);
+                                myMotor2(STOP);
+                                angulo=STOP;
+                                servoMove(angulo);
+                            }
+                        }
+
                     }
                 }
             // }else{ //si el modo esta inactivo
@@ -270,24 +309,24 @@ int main(){
             break;
         case LINE:                    
            // if(myFlags.modeOn==HIGH){
-                if(valueIr1>valueIr0){           
-                    ENA.pulsewidth_us(MOTORPULSE-100);
-                    ENB.pulsewidth_us(MOTORPULSE);
-                    myMotor1(FOWARD);
-                    myMotor2(FOWARD);
-                    myFlags.GetLine=STOP;
-                }    
-                if(valueIr0 > valueIr1){       
-                    ENB.pulsewidth_us(MOTORPULSE-100);
-                    ENA.pulsewidth_us(MOTORPULSE);
-                    myMotor1(STOP);
-                    myMotor2(FOWARD);
-                    myFlags.GetLine=HIGH;
-                }
-                if(valueIr1 > 20000 && valueIr0 > 20000 ){
-                    myMotor1(FOWARD);
-                    myMotor2(FOWARD);
-                }
+                // if(valueIr1>valueIr0){           
+                //     ENA.pulsewidth_us(MOTORPULSE-100);
+                //     ENB.pulsewidth_us(MOTORPULSE);
+                //     myMotor1(FOWARD);
+                //     myMotor2(FOWARD);
+                //     myFlags.GetLine=STOP;
+                // }    
+                // if(valueIr0 > valueIr1){       
+                //     ENB.pulsewidth_us(MOTORPULSE-100);
+                //     ENA.pulsewidth_us(MOTORPULSE);
+                //     myMotor1(STOP);
+                //     myMotor2(FOWARD);
+                //     myFlags.GetLine=HIGH;
+                // }
+                // if(valueIr1 > 20000 && valueIr0 > 20000 ){
+                //     myMotor1(FOWARD);
+                //     myMotor2(FOWARD);
+                // }
                 // if(valueIr1 <1000 && valueIr0 < 1000){ //si se perdio la linea 
                 //     if(myFlags.GetLine==HIGH){ //si hizo motor 1 STP y motor 2 FWD por ultimo 
                 //         myMotor1(FOWARD);
@@ -310,13 +349,29 @@ int main(){
         case ESCAPE:
                 ENA.pulsewidth_us(MOTORPULSE+70);
                 ENB.pulsewidth_us(MOTORPULSE+70);
-            if(counterM2 <= 30 && counterM1 <= 30){
-                myMotor1(FOWARD);
-                myMotor2(BACKWARD);    
-            }else{
-                myMotor1(STOP);    
-                myMotor2(STOP);   
-            }
+
+                    if(myFlags.readyPosition==STOP){
+                        if(counterM2 <= 41 && counterM1 <=41){
+                            myMotor1(FOWARD);
+                            myMotor2(BACKWARD);    
+                        }else{
+                            myMotor1(STOP);    
+                            myMotor2(STOP);   
+                            counterM2=0;
+                            counterM1=0;
+                            wait_ms(500);
+                            myFlags.readyPosition=HIGH;
+                        }
+                    }    
+                    else{
+                        if(counterM2 <= 50 && counterM1 <=50){
+                            myMotor1(BACKWARD);
+                            myMotor2(FOWARD);    
+                        }else{
+                            myMotor1(STOP);    
+                            myMotor2(STOP);   
+                        }
+                    }
             break;
         default:
             mode=IDLE;
