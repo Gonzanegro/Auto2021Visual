@@ -9,9 +9,9 @@
 #define PULSEMAX 2350 
 #define FOWARD 1
 #define BACKWARD 2
-#define MOTORPULSE 430
+#define MOTORPULSE 500
 #define DISTANCIA 348 //6cm
-#define DISTANCIARANGO 250//4.3
+#define DISTANCIARANGO 250//4.3 cm 
 #define DISTANCIAMAX 1800//20cm aprox
 #define ANGULOMAX 90
 #define ANGULOMIN -90
@@ -51,6 +51,13 @@ typedef enum{
     ESCAPE,
 }_emode;
 _emode mode;
+typedef enum{
+    SEARCHING,
+    AVOIDING,
+}_emodeState;
+
+_emodeState modeState;
+
 typedef enum{
     START,
     HEADER_1,
@@ -227,8 +234,8 @@ int main(){
             break;
         case FOLLOW:
             //if(myFlags.modeOn==HIGH){
-                ENA.pulsewidth_us(MOTORPULSE+70);
-                ENB.pulsewidth_us(MOTORPULSE+70);
+                ENA.pulsewidth_us(MOTORPULSE);
+                ENB.pulsewidth_us(MOTORPULSE);
                 if(timeSaved > DISTANCIAMAX){ //si la distancia es menor a 20cm aprox
                     if(miTimer.read_ms()-timeServo > INTERVAL){ //se mueve el servo
                         if(myFlags.servoMoved==HIGH){   //Si es la parte positiva
@@ -336,9 +343,40 @@ int main(){
                 //         myMotor2(FOWARD);
                 //     }
                 // }
-                if(timeSaved < DISTANCIARANGO){ //frena si detecta obstaculo
+                if(timeSaved < DISTANCIARANGO ){ //frena si detecta obstaculo
                     myMotor1(STOP);    
                     myMotor2(STOP);
+                }else{
+                    if(valueIr1 > 20000 && valueIr0 < 10000){
+                        ENA.pulsewidth_us(MOTORPULSE-270);
+                        ENB.pulsewidth_us(MOTORPULSE-105);
+                        myMotor1(FOWARD);
+                        myMotor2(FOWARD); 
+                        myFlags.GetLine=HIGH;
+                    }
+                    if(valueIr0 > 20000 && valueIr1 < 10000){
+                        ENA.pulsewidth_us(MOTORPULSE-105);
+                        ENB.pulsewidth_us(MOTORPULSE-270);
+                        myMotor1(FOWARD);
+                        myMotor2(FOWARD); 
+                        myFlags.GetLine=STOP;
+                    }
+                    if(valueIr1 < 2000 && valueIr0 < 2000){
+                        if(myFlags.GetLine==HIGH){//si corrigio con --ENA
+                            ENA.pulsewidth_us(MOTORPULSE+15); //-75
+                            ENB.pulsewidth_us(MOTORPULSE+15); //-40
+                            myMotor1(FOWARD);
+                            myMotor2(BACKWARD);
+                        }
+                        else{//si corrigio con --ENB
+                            ENA.pulsewidth_us(MOTORPULSE+15); //-75
+                            ENB.pulsewidth_us(MOTORPULSE+15); //-40
+                            myMotor1(BACKWARD);
+                            myMotor2(FOWARD);
+                        }
+                    }
+                
+                
                 }
             // }else{
             //     myMotor1(STOP);  
@@ -347,31 +385,10 @@ int main(){
             // }
             break;
         case ESCAPE:
-                ENA.pulsewidth_us(MOTORPULSE+70);
-                ENB.pulsewidth_us(MOTORPULSE+70);
-
-                    if(myFlags.readyPosition==STOP){
-                        if(counterM2 <= 41 && counterM1 <=41){
-                            myMotor1(FOWARD);
-                            myMotor2(BACKWARD);    
-                        }else{
-                            myMotor1(STOP);    
-                            myMotor2(STOP);   
-                            counterM2=0;
-                            counterM1=0;
-                            wait_ms(500);
-                            myFlags.readyPosition=HIGH;
-                        }
-                    }    
-                    else{
-                        if(counterM2 <= 50 && counterM1 <=50){
-                            myMotor1(BACKWARD);
-                            myMotor2(FOWARD);    
-                        }else{
-                            myMotor1(STOP);    
-                            myMotor2(STOP);   
-                        }
-                    }
+                ENA.pulsewidth_us(MOTORPULSE-100);
+                ENB.pulsewidth_us(MOTORPULSE-100);
+                myMotor2(FOWARD);
+                myMotor1(FOWARD);
             break;
         default:
             mode=IDLE;
@@ -427,12 +444,11 @@ void actuallizaMef(){
                 }else{
                     if(mode==FOLLOW){
                         myFlags.modeOn=STOP;
+                        servoMove(STOP);
                         mode=LINE;
                     }else{
                         if(mode==LINE){
                             myFlags.modeOn=STOP;
-                            counterM2=0;
-                            counterM1=0;
                             mode=ESCAPE;
                         }else{
                             myFlags.idleFlag=STOP;
@@ -723,19 +739,19 @@ void decodeData(void)
                 myNewWord.i8[3]=datosComProtocol.payload[9];
                 testM2=myNewWord.i32;
                 if(mode==IDLE){    
-                    if(testM1 <= 0){
-                        myMotor1(BACKWARD);
+                    if(testM1 < 0){
                         testM1=testM1*-1;
                         ENA.pulsewidth_us(testM1);
+                        myMotor1(BACKWARD);
                     }else{
                         ENA.pulsewidth_us(testM1); 
                         myMotor1(FOWARD); 
                     }    
                     
-                    if(testM2<=0){
-                        myMotor2(BACKWARD);
+                    if(testM2 < 0){
                         testM2=testM2*-1;
                         ENB.pulsewidth_us(testM2);
+                        myMotor2(BACKWARD);
                     }else{
                         ENB.pulsewidth_us(testM2); 
                         myMotor2(FOWARD); 
