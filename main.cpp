@@ -23,7 +23,7 @@ typedef union{
             unsigned char idleFlag: 1;
             unsigned char GetLine: 1;
             unsigned char readyPosition: 1;
-            unsigned char b5: 1;
+            unsigned char turn: 1;
             unsigned char b6: 1;
             unsigned char b7: 1;
     }_uflag;
@@ -56,6 +56,7 @@ typedef enum{
     MOVERIGHT,
     MOVELEFT,
     AVOIDING,
+    STOPPED,
 }_emodeState;
 
 _emodeState modeState;
@@ -160,8 +161,8 @@ Timer miTimer;
 Timer miTimer1;
 Ticker readSensor;
 Timeout timeout;
-uint8_t factor,counterM1=0,counterM2=0,counterRight=0,counterLeft=0,rotationLeft=0,rotationRight=0;
-uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,timePos=0,speedM1=0,speedM2=0;
+uint8_t factor,counterM1=0,counterM2=0,counterRight=0,counterLeft=0,rotationLeft=0,rotationRight=0,counterLine=0;
+uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,timePos=0,speedM1=0,speedM2=0,timeTurn=0;
 uint16_t ANCHO=1000,valueIr0,valueIr1;
 int32_t testM1,testM2;
 int16_t difValue;
@@ -327,6 +328,8 @@ int main(){
                             ENB.pulsewidth_us(MOTORPULSE+100);
                             counterM1=0;
                             counterM2=0;
+                            counterLine=0;
+                            myFlags.turn=HIGH;
                             modeState=MOVERIGHT;
                         }else{
                             if(valueIr1 > 20000 && valueIr0 < 10000){
@@ -368,15 +371,19 @@ int main(){
                             ENB.pulsewidth_us(MOTORPULSE);
                             myMotor2(STOP);
                             myMotor1(STOP);
-                            modeState=AVOIDING;
+                            if(myFlags.turn==HIGH){
+                                modeState=AVOIDING;
+                            }else{
+                                modeState=SEARCHING;
+                            }
                             counterM2=0;
                             counterM1=0;
                         }
                     break;    
-                    case MOVELEFT:
-                        if(counterM1 <=55 && counterM2 <=55){
-                            ENA.pulsewidth_us(MOTORPULSE);
-                            ENB.pulsewidth_us(MOTORPULSE-250);
+                    case MOVELEFT:                        
+                        if(timeSaved > DISTANCIAMAX){
+                            ENA.pulsewidth_us(MOTORPULSE-300);
+                            ENB.pulsewidth_us(MOTORPULSE);
                             myMotor1(FOWARD);
                             myMotor2(FOWARD);
                         }else{
@@ -390,37 +397,62 @@ int main(){
                         }
                     break;
                     case AVOIDING:
-                        if(timeSaved >=580 && timeSaved <=870){
-                            counterM2=0;
-                            counterM1=0;
-                            ENA.pulsewidth_us(MOTORPULSE);
-                            ENB.pulsewidth_us(MOTORPULSE);
-                            myMotor1(FOWARD);
-                            myMotor2(FOWARD);
-                        
+                        if(valueIr1 > 10000 || valueIr0 > 10000){
+                            myMotor1(STOP);   
+                            myMotor2(STOP);
+                            servoMove(STOP);
+                            modeState=STOPPED;
+                            //modeState=MOVERIGHT;
                         }
-                        if(timeSaved < 580){
-                                counterM2=0;
-                                counterM1=0;
+                        if(myFlags.turn==HIGH){
+                            if(timeSaved >=580 && timeSaved <=870){
+                                timeTurn=miTimer.read_ms();
+                                
                                 ENA.pulsewidth_us(MOTORPULSE-50);
-                                ENB.pulsewidth_us(MOTORPULSE-200);
-                                myMotor1(FOWARD);
-                                myMotor2(FOWARD);  
-                        }  
-                        if(timeSaved >870 && timeSaved < DISTANCIAMAX ){
-                                counterM2=0;
-                                counterM1=0;
-                                ENA.pulsewidth_us(MOTORPULSE-200);
                                 ENB.pulsewidth_us(MOTORPULSE-50);
                                 myMotor1(FOWARD);
-                                myMotor2(FOWARD); 
-                        }                 
-                        if(timeSaved > DISTANCIAMAX){
-                            myMotor2(STOP);
-                            myMotor1(STOP);
-                            modeState=MOVELEFT;
+                                myMotor2(FOWARD);
+                            
+                            }
+                            if(timeSaved < 580){
+                                    timeTurn=miTimer.read_ms();
+                                    ENA.pulsewidth_us(MOTORPULSE-80);
+                                    ENB.pulsewidth_us(MOTORPULSE-220);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD);  
+                            }  
+                            if(timeSaved >870 && timeSaved < DISTANCIAMAX ){
+                                    
+                                    timeTurn=miTimer.read_ms();
+                                    
+                                    ENA.pulsewidth_us(MOTORPULSE-220);
+                                    ENB.pulsewidth_us(MOTORPULSE-80);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD); 
+                            }                 
+                            if(timeSaved > DISTANCIAMAX){
+                                myMotor2(STOP);
+                                myMotor1(STOP);
+                                if(timeTurn - miTimer.read_ms() > 200){
+                                    counterM2=0;
+                                    counterM1=0;
+                                    modeState=MOVELEFT;
+                                    timeTurn=miTimer.read_ms();
+                                }
+                            }
                         }
-                    
+                    break;
+                    case STOPPED:
+                        myMotor1(STOP);
+                        myMotor2(STOP);
+                        if(counterLine == 3){
+                            myFlags.turn=STOP;
+                            modeState=MOVERIGHT;
+                        }else{
+                            modeState=AVOIDING;
+                            counterLine++;
+                            myFlags.turn=HIGH;
+                        }
                     break;
                 }
             break;
@@ -715,6 +747,7 @@ void readIr(){
     datosComProtocol.payload[1]=GET_IR;
     decodeData();
 }
+
 /*****************************************************************************************************/
 /************  Función para procesar el comando recibido ***********************/
 void decodeData(void)
