@@ -53,6 +53,8 @@ typedef enum{
 _emode mode;
 typedef enum{
     SEARCHING,
+    MOVERIGHT,
+    MOVELEFT,
     AVOIDING,
 }_emodeState;
 
@@ -314,75 +316,113 @@ int main(){
             //     //servoMove(STOP);
             // }
             break;
-        case LINE:                    
-           // if(myFlags.modeOn==HIGH){
-                // if(valueIr1>valueIr0){           
-                //     ENA.pulsewidth_us(MOTORPULSE-100);
-                //     ENB.pulsewidth_us(MOTORPULSE);
-                //     myMotor1(FOWARD);
-                //     myMotor2(FOWARD);
-                //     myFlags.GetLine=STOP;
-                // }    
-                // if(valueIr0 > valueIr1){       
-                //     ENB.pulsewidth_us(MOTORPULSE-100);
-                //     ENA.pulsewidth_us(MOTORPULSE);
-                //     myMotor1(STOP);
-                //     myMotor2(FOWARD);
-                //     myFlags.GetLine=HIGH;
-                // }
-                // if(valueIr1 > 20000 && valueIr0 > 20000 ){
-                //     myMotor1(FOWARD);
-                //     myMotor2(FOWARD);
-                // }
-                // if(valueIr1 <1000 && valueIr0 < 1000){ //si se perdio la linea 
-                //     if(myFlags.GetLine==HIGH){ //si hizo motor 1 STP y motor 2 FWD por ultimo 
-                //         myMotor1(FOWARD);
-                //         myMotor2(STOP);
-                //     }else{ //si por utimo hizo motor2STP y motor 1 FWD
-                //         myMotor1(STOP);
-                //         myMotor2(FOWARD);
-                //     }
-                // }
-                if(timeSaved < DISTANCIARANGO ){ //frena si detecta obstaculo
-                    myMotor1(STOP);    
-                    myMotor2(STOP);
-                }else{
-                    if(valueIr1 > 20000 && valueIr0 < 10000){
-                        ENA.pulsewidth_us(MOTORPULSE-270);
-                        ENB.pulsewidth_us(MOTORPULSE-105);
-                        myMotor1(FOWARD);
-                        myMotor2(FOWARD); 
-                        myFlags.GetLine=HIGH;
-                    }
-                    if(valueIr0 > 20000 && valueIr1 < 10000){
-                        ENA.pulsewidth_us(MOTORPULSE-105);
-                        ENB.pulsewidth_us(MOTORPULSE-270);
-                        myMotor1(FOWARD);
-                        myMotor2(FOWARD); 
-                        myFlags.GetLine=STOP;
-                    }
-                    if(valueIr1 < 2000 && valueIr0 < 2000){
-                        if(myFlags.GetLine==HIGH){//si corrigio con --ENA
-                            ENA.pulsewidth_us(MOTORPULSE+15); //-75
-                            ENB.pulsewidth_us(MOTORPULSE+15); //-40
-                            myMotor1(FOWARD);
-                            myMotor2(BACKWARD);
+        case LINE: 
+                switch(modeState){
+                    case SEARCHING:
+                        if(timeSaved < DISTANCIARANGO + DISTANCIA+58 ){ //frena si detecta obstaculo
+                            myMotor1(STOP);    
+                            myMotor2(STOP);
+                            servoMove(ANGULOMAX);
+                            ENA.pulsewidth_us(MOTORPULSE+100);
+                            ENB.pulsewidth_us(MOTORPULSE+100);
+                            counterM1=0;
+                            counterM2=0;
+                            modeState=MOVERIGHT;
+                        }else{
+                            if(valueIr1 > 20000 && valueIr0 < 10000){
+                                ENA.pulsewidth_us(MOTORPULSE-270);
+                                ENB.pulsewidth_us(MOTORPULSE-105);
+                                myMotor1(FOWARD);
+                                myMotor2(FOWARD); 
+                                myFlags.GetLine=HIGH;
+                            }
+                            if(valueIr0 > 20000 && valueIr1 < 10000){
+                                ENA.pulsewidth_us(MOTORPULSE-105);
+                                ENB.pulsewidth_us(MOTORPULSE-270);
+                                myMotor1(FOWARD);
+                                myMotor2(FOWARD); 
+                                myFlags.GetLine=STOP;
+                            }
+                            if(valueIr1 < 2000 && valueIr0 < 2000){
+                                if(myFlags.GetLine==HIGH){//si corrigio con --ENA
+                                    ENA.pulsewidth_us(MOTORPULSE-50); //-75
+                                    ENB.pulsewidth_us(MOTORPULSE-50); //-40
+                                    myMotor1(FOWARD);
+                                    myMotor2(BACKWARD);
+                                }
+                                else{//si corrigio con --ENB
+                                    ENA.pulsewidth_us(MOTORPULSE-50); //-75
+                                    ENB.pulsewidth_us(MOTORPULSE-50); //-40
+                                    myMotor1(BACKWARD);
+                                    myMotor2(FOWARD);
+                                }
+                            }
                         }
-                        else{//si corrigio con --ENB
-                            ENA.pulsewidth_us(MOTORPULSE+15); //-75
-                            ENB.pulsewidth_us(MOTORPULSE+15); //-40
+                    break;
+                    case MOVERIGHT:
+                        if(counterM1 <= 55 && counterM2 <= 55){
                             myMotor1(BACKWARD);
                             myMotor2(FOWARD);
+                        }else{
+                            ENA.pulsewidth_us(MOTORPULSE);
+                            ENB.pulsewidth_us(MOTORPULSE);
+                            myMotor2(STOP);
+                            myMotor1(STOP);
+                            modeState=AVOIDING;
+                            counterM2=0;
+                            counterM1=0;
                         }
-                    }
-                
-                
+                    break;    
+                    case MOVELEFT:
+                        if(counterM1 <=55 && counterM2 <=55){
+                            ENA.pulsewidth_us(MOTORPULSE);
+                            ENB.pulsewidth_us(MOTORPULSE-250);
+                            myMotor1(FOWARD);
+                            myMotor2(FOWARD);
+                        }else{
+                            myMotor2(STOP);
+                            myMotor1(STOP);
+                            ENA.pulsewidth_us(MOTORPULSE);
+                            ENB.pulsewidth_us(MOTORPULSE);                            
+                            modeState=AVOIDING;
+                            //counterM2=0;
+                            //counterM1=0;
+                        }
+                    break;
+                    case AVOIDING:
+                        if(timeSaved >=580 && timeSaved <=870){
+                            counterM2=0;
+                            counterM1=0;
+                            ENA.pulsewidth_us(MOTORPULSE);
+                            ENB.pulsewidth_us(MOTORPULSE);
+                            myMotor1(FOWARD);
+                            myMotor2(FOWARD);
+                        
+                        }
+                        if(timeSaved < 580){
+                                counterM2=0;
+                                counterM1=0;
+                                ENA.pulsewidth_us(MOTORPULSE-50);
+                                ENB.pulsewidth_us(MOTORPULSE-200);
+                                myMotor1(FOWARD);
+                                myMotor2(FOWARD);  
+                        }  
+                        if(timeSaved >870 && timeSaved < DISTANCIAMAX ){
+                                counterM2=0;
+                                counterM1=0;
+                                ENA.pulsewidth_us(MOTORPULSE-200);
+                                ENB.pulsewidth_us(MOTORPULSE-50);
+                                myMotor1(FOWARD);
+                                myMotor2(FOWARD); 
+                        }                 
+                        if(timeSaved > DISTANCIAMAX){
+                            myMotor2(STOP);
+                            myMotor1(STOP);
+                            modeState=MOVELEFT;
+                        }
+                    
+                    break;
                 }
-            // }else{
-            //     myMotor1(STOP);  
-            //     myMotor2(STOP); 
-            //     //servoMove(STOP);
-            // }
             break;
         case ESCAPE:
                 ENA.pulsewidth_us(MOTORPULSE-100);
@@ -445,6 +485,9 @@ void actuallizaMef(){
                     if(mode==FOLLOW){
                         myFlags.modeOn=STOP;
                         servoMove(STOP);
+                        modeState=SEARCHING;
+                        counterM1=0;
+                        counterM2=0;
                         mode=LINE;
                     }else{
                         if(mode==LINE){
