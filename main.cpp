@@ -13,6 +13,7 @@
 #define DISTANCIA 348 //6cm
 #define DISTANCIARANGO 250//4.3 cm 
 #define DISTANCIAMAX 1800//20cm aprox
+#define DISTANCIAEND 2900 //50cm 
 #define ANGULOMAX 90
 #define ANGULOMIN -90
 #define TURNLEFT 45//pulsos de horuqilla para -90
@@ -130,6 +131,7 @@ void readSpeedHl();
 void readSpeedHr();
 void readSensors();
 void readIr();
+void followLine();
 
 DigitalOut LED(PC_13);
 DigitalOut LEDAUX(PB_9);
@@ -332,34 +334,7 @@ int main(){
                             myFlags.turn=HIGH;
                             modeState=MOVERIGHT;
                         }else{
-                            if(valueIr1 > 20000 && valueIr0 < 10000){
-                                ENA.pulsewidth_us(MOTORPULSE-270);
-                                ENB.pulsewidth_us(MOTORPULSE-105);
-                                myMotor1(FOWARD);
-                                myMotor2(FOWARD); 
-                                myFlags.GetLine=HIGH;
-                            }
-                            if(valueIr0 > 20000 && valueIr1 < 10000){
-                                ENA.pulsewidth_us(MOTORPULSE-105);
-                                ENB.pulsewidth_us(MOTORPULSE-270);
-                                myMotor1(FOWARD);
-                                myMotor2(FOWARD); 
-                                myFlags.GetLine=STOP;
-                            }
-                            if(valueIr1 < 2000 && valueIr0 < 2000){
-                                if(myFlags.GetLine==HIGH){//si corrigio con --ENA
-                                    ENA.pulsewidth_us(MOTORPULSE-50); //-75
-                                    ENB.pulsewidth_us(MOTORPULSE-50); //-40
-                                    myMotor1(FOWARD);
-                                    myMotor2(BACKWARD);
-                                }
-                                else{//si corrigio con --ENB
-                                    ENA.pulsewidth_us(MOTORPULSE-50); //-75
-                                    ENB.pulsewidth_us(MOTORPULSE-50); //-40
-                                    myMotor1(BACKWARD);
-                                    myMotor2(FOWARD);
-                                }
-                            }
+                            followLine();
                         }
                     break;
                     case MOVERIGHT:
@@ -457,10 +432,49 @@ int main(){
                 }
             break;
         case ESCAPE:
-                ENA.pulsewidth_us(MOTORPULSE-100);
-                ENB.pulsewidth_us(MOTORPULSE-100);
-                myMotor2(FOWARD);
-                myMotor1(FOWARD);
+                switch(modeState){
+                        case SEARCHING:
+                            if(timeSaved < DISTANCIAMAX){ 
+                                myMotor2(STOP);
+                                myMotor1(STOP);
+                            }else{
+                                if(valueIr1 > 20000 && valueIr0 < 10000){
+                                    ENA.pulsewidth_us(MOTORPULSE-270);
+                                    ENB.pulsewidth_us(MOTORPULSE-105);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD); 
+                                    myFlags.GetLine=HIGH;
+                                }
+                                if(valueIr0 > 20000 && valueIr1 < 10000){
+                                    ENA.pulsewidth_us(MOTORPULSE-105);
+                                    ENB.pulsewidth_us(MOTORPULSE-270);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD); 
+                                    myFlags.GetLine=STOP;
+                                }
+                                if(valueIr1 < 15000 && valueIr0 < 15000){
+                                    if(myFlags.GetLine==HIGH){//si corrigio con --ENA
+                                        ENA.pulsewidth_us(MOTORPULSE-50); //-75
+                                        ENB.pulsewidth_us(MOTORPULSE-50); //-40
+                                        myMotor1(FOWARD);
+                                        myMotor2(BACKWARD);
+                                    }
+                                    else{//si corrigio con --ENB
+                                        ENA.pulsewidth_us(MOTORPULSE-50); //-75
+                                        ENB.pulsewidth_us(MOTORPULSE-50); //-40
+                                        myMotor1(BACKWARD);
+                                        myMotor2(FOWARD);
+                                    }
+                                }
+                            }
+                        break;
+                        case MOVELEFT:
+                        break;
+                        case MOVERIGHT:
+                        break;
+                        case STOPPED:
+                        break;
+                }
             break;
         default:
             mode=IDLE;
@@ -524,6 +538,8 @@ void actuallizaMef(){
                     }else{
                         if(mode==LINE){
                             myFlags.modeOn=STOP;
+                            modeState=SEARCHING;
+                            servoMove(STOP);
                             mode=ESCAPE;
                         }else{
                             myFlags.idleFlag=STOP;
@@ -747,7 +763,36 @@ void readIr(){
     datosComProtocol.payload[1]=GET_IR;
     decodeData();
 }
-
+void followLine(){
+    if(valueIr1 > 20000 && valueIr0 < 10000){
+        ENA.pulsewidth_us(MOTORPULSE-270);
+        ENB.pulsewidth_us(MOTORPULSE-105);
+        myMotor1(FOWARD);
+        myMotor2(FOWARD); 
+        myFlags.GetLine=HIGH;
+    }
+    if(valueIr0 > 20000 && valueIr1 < 10000){
+        ENA.pulsewidth_us(MOTORPULSE-105);
+        ENB.pulsewidth_us(MOTORPULSE-270);
+        myMotor1(FOWARD);
+        myMotor2(FOWARD); 
+        myFlags.GetLine=STOP;
+    }
+    if(valueIr1 < 2000 && valueIr0 < 2000){
+        if(myFlags.GetLine==HIGH){//si corrigio con --ENA
+            ENA.pulsewidth_us(MOTORPULSE-50); //-75
+            ENB.pulsewidth_us(MOTORPULSE-50); //-40
+            myMotor1(FOWARD);
+            myMotor2(BACKWARD);
+        }
+        else{//si corrigio con --ENB
+            ENA.pulsewidth_us(MOTORPULSE-50); //-75
+            ENB.pulsewidth_us(MOTORPULSE-50); //-40
+            myMotor1(BACKWARD);
+            myMotor2(FOWARD);
+        }
+    }
+}
 /*****************************************************************************************************/
 /************  Función para procesar el comando recibido ***********************/
 void decodeData(void)
