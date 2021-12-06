@@ -9,6 +9,7 @@
 #define PULSEMAX 2350 
 #define FOWARD 1
 #define BACKWARD 2
+#define PAUSE 3
 #define MOTORPULSE 500
 #define DISTANCIA 348 //6cm
 #define DISTANCIARANGO 250//4.3 cm 
@@ -25,8 +26,8 @@ typedef union{
             unsigned char GetLine: 1;
             unsigned char readyPosition: 1;
             unsigned char turn: 1;
-            unsigned char b6: 1;
-            unsigned char b7: 1;
+            unsigned char choose: 1;
+            unsigned char division: 1;
     }_uflag;
 _uflag myFlags;
 typedef union {
@@ -132,6 +133,7 @@ void readSpeedHr();
 void readSensors();
 void readIr();
 void followLine();
+void lookAround(int direccion);
 
 DigitalOut LED(PC_13);
 DigitalOut LEDAUX(PB_9);
@@ -163,9 +165,9 @@ Timer miTimer;
 Timer miTimer1;
 Ticker readSensor;
 Timeout timeout;
-uint8_t factor,counterM1=0,counterM2=0,counterRight=0,counterLeft=0,rotationLeft=0,rotationRight=0,counterLine=0;
+uint8_t factor,direccion=0,counterM1=0,counterM2=0,counterRight=0,counterLeft=0,rotationLeft=0,rotationRight=0,counterLine=0;
 uint32_t timeHb=0,timeSaved=0,timeToChk=0,timeServo=0,timeIr=0,timePos=0,speedM1=0,speedM2=0,timeTurn=0;
-uint16_t ANCHO=1000,valueIr0,valueIr1;
+uint16_t ANCHO=1000,valueIr0,valueIr1,distanceFoward,distanceLeft,distanceRight;
 int32_t testM1,testM2;
 int16_t difValue;
 int8_t angulo=0;
@@ -211,6 +213,7 @@ int main(){
     myFlags.GetLine=STOP; 
     myFlags.readyPosition=STOP;
     mode=IDLE;
+    srand(miTimer.read_ms());
     while(1){
         if(miTimer.read_ms()-timeToChk > DSTINTERVAL){
                 TRIGGER.write(HIGH);
@@ -434,45 +437,126 @@ int main(){
         case ESCAPE:
                 switch(modeState){
                         case SEARCHING:
-                            if(timeSaved < DISTANCIAMAX){ 
-                                myMotor2(STOP);
-                                myMotor1(STOP);
+                                    if(timeSaved < DISTANCIAMAX || (valueIr0 >20000 && valueIr1 >20000)){  //si encuentra objeto o bifurcacion 
+                                        myMotor2(STOP);
+                                        myMotor1(STOP);
+                                        direccion=STOP;
+                                        modeState=STOPPED;
+                                    }else{
+                                        followLine();
+                                    }
+                        break;
+                        case MOVELEFT:
+                            if(counterM1 <= 33 && counterM2 <=33 ){ //pulsos fijos para doblar un angulo
+                                ENA.pulsewidth_us(MOTORPULSE-50);
+                                ENB.pulsewidth_us(MOTORPULSE-50);
+                                myMotor1(FOWARD);
+                                myMotor2(BACKWARD);
+                            }else{ //ya puede buscar linea 
+                                if(valueIr0 >5000|| valueIr1 > 5000){
+                                    ENA.pulsewidth_us(MOTORPULSE-110);
+                                    ENB.pulsewidth_us(MOTORPULSE-110);
+                                    myMotor2(PAUSE);
+                                    myMotor1(PAUSE);
+                                    //modeState=SEARCHING;
+                                }else{
+                                    ENA.pulsewidth_us(MOTORPULSE-120);
+                                    ENB.pulsewidth_us(MOTORPULSE-120);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD);
+                                }
+                            }                        
+                        break;
+                        case MOVERIGHT: //estado para doblar a la derecha 
+                            if(counterM1 <= 33 && counterM2 <=33 ){
+                                ENA.pulsewidth_us(MOTORPULSE-50);
+                                ENB.pulsewidth_us(MOTORPULSE-50);
+                                myMotor1(BACKWARD);
+                                myMotor2(FOWARD);
                             }else{
-                                if(valueIr1 > 20000 && valueIr0 < 10000){
-                                    ENA.pulsewidth_us(MOTORPULSE-270);
-                                    ENB.pulsewidth_us(MOTORPULSE-105);
+                                if(valueIr0 > 5000 || valueIr1 > 5000){ //si encuentra linea 
+                                    ENA.pulsewidth_us(MOTORPULSE-110);
+                                    ENB.pulsewidth_us(MOTORPULSE-110);
+                                    myMotor2(PAUSE);
+                                    myMotor1(PAUSE);
+                                    //modeState=SEARCHING;
+                                }else{ //buscando linea 
+                                    ENA.pulsewidth_us(MOTORPULSE-120);
+                                    ENB.pulsewidth_us(MOTORPULSE-120);
                                     myMotor1(FOWARD);
-                                    myMotor2(FOWARD); 
-                                    myFlags.GetLine=HIGH;
-                                }
-                                if(valueIr0 > 20000 && valueIr1 < 10000){
-                                    ENA.pulsewidth_us(MOTORPULSE-105);
-                                    ENB.pulsewidth_us(MOTORPULSE-270);
-                                    myMotor1(FOWARD);
-                                    myMotor2(FOWARD); 
-                                    myFlags.GetLine=STOP;
-                                }
-                                if(valueIr1 < 15000 && valueIr0 < 15000){
-                                    if(myFlags.GetLine==HIGH){//si corrigio con --ENA
-                                        ENA.pulsewidth_us(MOTORPULSE-50); //-75
-                                        ENB.pulsewidth_us(MOTORPULSE-50); //-40
-                                        myMotor1(FOWARD);
-                                        myMotor2(BACKWARD);
-                                    }
-                                    else{//si corrigio con --ENB
-                                        ENA.pulsewidth_us(MOTORPULSE-50); //-75
-                                        ENB.pulsewidth_us(MOTORPULSE-50); //-40
-                                        myMotor1(BACKWARD);
-                                        myMotor2(FOWARD);
-                                    }
+                                    myMotor2(FOWARD);
                                 }
                             }
                         break;
-                        case MOVELEFT:
+                        case STOPPED:                      
+                            if(direccion < 3){ //analiza el entorno 
+                                if((miTimer.read_ms()-timePos) > 1000){
+                                    lookAround(direccion);
+                                    direccion++;
+                                    timePos=miTimer.read_ms();
+                                    }
+                            }else{ //si ya analizo el entorno 
+                               if(distanceFoward < DISTANCIAMAX ){ //Si hay obstaculo delante 
+                                   if(distanceLeft >DISTANCIAMAX && distanceRight > DISTANCIAMAX){ //si tiene que elegir un lado para doblar 
+                                        //myFlags.choose=rand() % 1;
+                                        myFlags.choose=!myFlags.choose; //valor aleatorio 
+                                        if(myFlags.choose==HIGH){
+                                            counterM1=0;
+                                            counterM2=0;        
+                                            modeState=MOVELEFT; //dobla a la izquierda
+                                        }else{
+                                            counterM1=0;
+                                            counterM2=0;        
+                                            modeState=MOVERIGHT; //dobla a la derecha 
+                                        } 
+                                   }else{   //si no hay que elegir y debe doblar si o si a algun lado   
+                                        if(distanceLeft > distanceRight){ //revisa a que lado doblar 
+                                            counterM1=0;
+                                            counterM2=0;
+                                            modeState=MOVELEFT;
+                                        }else{
+                                            counterM1=0;
+                                            counterM2=0;
+                                            modeState=MOVERIGHT;
+                                        }
+                                   }
+                               }else{ //si delante no hay obstaculo (bifurcacion)
+                                    if(distanceLeft > DISTANCIAEND && distanceRight > DISTANCIAEND){ //si gano 
+                                        
+                                    }else{ //si no gano 
+                                        //myFlags.choose=rand() % 1;    
+                                        myFlags.choose=!myFlags.choose;// sentido aleatorio 
+                                        if(myFlags.choose==HIGH){ // si decide doblar mira hacia que lado  
+                                            counterM1=0;
+                                            counterM2=0;        
+                                            if(distanceLeft > DISTANCIAMAX)
+                                                modeState=MOVELEFT;
+                                            else
+                                                modeState=MOVERIGHT;
+                                        }else{ //si decide seguir 
+                                            counterM1=0;
+                                            counterM2=0;        
+                                            modeState=AVOIDING;
+                                        } 
+                                    } 
+                               }     
+                            }
                         break;
-                        case MOVERIGHT:
-                        break;
-                        case STOPPED:
+                        case AVOIDING: //si decide seguir adelante en la bifurcacion
+                                if(counterM1 < 30 && counterM2 < 30){ //saltea la primer bifucacion
+                                    ENA.pulsewidth_us(MOTORPULSE-80);
+                                    ENB.pulsewidth_us(MOTORPULSE-80);
+                                    myMotor1(FOWARD);
+                                    myMotor2(FOWARD);
+                                }
+                                else{
+                                    if(counterM1 < 60 && counterM2 < 60){ //saltea la segunda bifurcacion
+                                        followLine();
+                                    }else{
+                                        myMotor1(STOP);
+                                        myMotor2(STOP);
+                                    }                                  
+                                }
                         break;
                 }
             break;
@@ -656,6 +740,10 @@ void myMotor1(uint8_t direction){
         IN4=HIGH; 
 
     }
+    if(direction == PAUSE){
+        IN3=HIGH;
+        IN4=HIGH;
+    }
 }
 void myMotor2(uint8_t direction){
     if(direction==FOWARD){
@@ -668,6 +756,10 @@ void myMotor2(uint8_t direction){
     }
     if(direction==BACKWARD){
         IN1=STOP;
+        IN2=HIGH;
+    }
+    if(direction == PAUSE){
+        IN1=HIGH;
         IN2=HIGH;
     }
 }
@@ -780,18 +872,38 @@ void followLine(){
     }
     if(valueIr1 < 2000 && valueIr0 < 2000){
         if(myFlags.GetLine==HIGH){//si corrigio con --ENA
-            ENA.pulsewidth_us(MOTORPULSE-50); //-75
-            ENB.pulsewidth_us(MOTORPULSE-50); //-40
+            ENA.pulsewidth_us(MOTORPULSE-90); //-75
+            ENB.pulsewidth_us(MOTORPULSE-90); //-40
             myMotor1(FOWARD);
             myMotor2(BACKWARD);
         }
         else{//si corrigio con --ENB
-            ENA.pulsewidth_us(MOTORPULSE-50); //-75
-            ENB.pulsewidth_us(MOTORPULSE-50); //-40
+            ENA.pulsewidth_us(MOTORPULSE-90); //-75
+            ENB.pulsewidth_us(MOTORPULSE-90); //-40
             myMotor1(BACKWARD);
             myMotor2(FOWARD);
         }
     }
+}
+void lookAround(int direccion){
+    switch (direccion)
+    {
+    case 0:
+        distanceFoward=timeSaved;
+        servoMove(ANGULOMIN);
+        break;
+    case 1:
+        distanceRight=timeSaved;
+        servoMove(ANGULOMAX);
+    break;
+    case 2:
+        distanceLeft=timeSaved;
+        servoMove(STOP);
+    break;
+    default:
+        break;
+    }
+
 }
 /*****************************************************************************************************/
 /************  Función para procesar el comando recibido ***********************/
