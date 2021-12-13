@@ -19,7 +19,7 @@
 #define ANGULOMIN -90
 #define TURNLEFT 45//pulsos de horuqilla para -90
 #define TURNRIGHT 45 //pulsos de horquilla para 90
-#define PULSETURN 35
+#define PULSETURN 37
 typedef union{
                 unsigned char modeOn: 1;
                 unsigned char servoMoved: 1;
@@ -246,7 +246,8 @@ int main(){
                 }
             break;
         case FOLLOW:
-            //if(myFlags.modeOn==HIGH){
+            if(myFlags.modeOn==HIGH){
+                LEDAUX=STOP;
                 ENA.pulsewidth_us(MOTORPULSE);
                 ENB.pulsewidth_us(MOTORPULSE);
                 if(timeSaved > DISTANCIAMAX){ //si la distancia es menor a 20cm aprox
@@ -321,11 +322,11 @@ int main(){
 
                     }
                 }
-            // }else{ //si el modo esta inactivo
-            //     myMotor1(STOP);  
-            //     myMotor2(STOP);
-            //     //servoMove(STOP);
-            // }
+             }else{ //si el modo esta inactivo
+                 LEDAUX=HIGH;
+                 myMotor1(STOP);  
+                 myMotor2(STOP);
+            }
             break;
         case LINE: 
                 switch(modeState){
@@ -452,7 +453,7 @@ int main(){
                                     }
                         break;
                         case MOVELEFT:
-                            if(counterM1 <= PULSETURN-5  && counterM2 <=PULSETURN-5 ){ //pulsos fijos para doblar un angulo
+                            if(counterM1 <= PULSETURN-2  && counterM2 <=PULSETURN-2 ){ //pulsos fijos para doblar un angulo
                                 ENA.pulsewidth_us(MOTORPULSE-10);
                                 ENB.pulsewidth_us(MOTORPULSE-10);
                                 myMotor1(FOWARD);
@@ -526,8 +527,8 @@ int main(){
                                         if(bifurcacion==false){  
                                              if((miTimer.read_ms()-timeContinue) > 1500){
                                                 LEDAUX=STOP;
-                                                myMotor1(PAUSE);  
-                                                myMotor2(PAUSE);
+                                                myMotor1(STOP);  
+                                                myMotor2(STOP);
                                                 modeState=SEARCHING;
                                              }else{
                                                  followLine();   
@@ -535,8 +536,8 @@ int main(){
                                         }else{ //si hay bifucarcion
                                             if((miTimer.read_ms()-timeContinue) > 3000){
                                                 LEDAUX=STOP;
-                                                myMotor1(PAUSE);  
-                                                myMotor2(PAUSE);
+                                                myMotor1(STOP);  
+                                                myMotor2(STOP);
                                                 modeState=SEARCHING;
                                             }else{
                                                 LEDAUX=HIGH;
@@ -546,10 +547,6 @@ int main(){
                                         }
                                     }
                                 }else{ //buscando linea 
-                                        ENA.pulsewidth_us(MOTORPULSE-200);
-                                        ENB.pulsewidth_us(MOTORPULSE-200);
-                                        myMotor1(FOWARD);
-                                        myMotor2(FOWARD);
                                         if(wasHere==true){
                                             followLine();
                                         }else{
@@ -703,6 +700,7 @@ void actuallizaMef(){
                         modeState=SEARCHING;
                         counterM1=0;
                         counterM2=0;
+                        LEDAUX=STOP;
                         mode=LINE;
                     }else{
                         if(mode==LINE){
@@ -712,15 +710,17 @@ void actuallizaMef(){
                             mode=ESCAPE;
                         }else{
                             myFlags.idleFlag=STOP;
-                            LEDAUX=STOP;
+                            myFlags.modeOn=STOP;
                             mode=IDLE;
                         }
                     }
                 }            
             }
-            if(ourButton.timeDiff>=1000 && ourButton.timeDiff<=2000){
+            if(ourButton.timeDiff>=1001 && ourButton.timeDiff<=2999){
                 if(myFlags.modeOn==STOP)//si el modo esta off
                     myFlags.modeOn=HIGH;//lo inicio 
+                else
+                    myFlags.modeOn=STOP;
             }
             if(ourButton.timeDiff >=3000 && mode!=IDLE){
                 myFlags.modeOn=STOP;
